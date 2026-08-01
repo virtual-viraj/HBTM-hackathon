@@ -11,7 +11,6 @@ from curator import generate_recommendations
 from nudge import generate_nudge
 from roadmap import generate_roadmap
 from journal import analyze_journal
-from orchestrator import generate_growth_plan
 
 __all__ = [
     "parse_aspiration",
@@ -19,5 +18,4 @@ __all__ = [
     "generate_nudge",
     "generate_roadmap",
     "analyze_journal",
-    "generate_growth_plan",
-]
+]
