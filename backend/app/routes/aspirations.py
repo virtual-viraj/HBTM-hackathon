@@ -1,68 +1,37 @@
 from fastapi import APIRouter, HTTPException
-from app.models.aspirations import AspirationRequest, AspirationResponse
-from app.firestore import db
-from app.gemini_client import model
-import json
+from pydantic import BaseModel
+from typing import Optional
+from app.firestore import save_document, get_document
+from ai_service import parse_aspiration
 
-router = APIRouter(prefix="/api/aspirations", tags=["aspirations"])
+router = APIRouter(prefix="/api", tags=["aspirations"])
 
-@router.post("/", response_model=AspirationResponse)
-async def create_aspiration(request: AspirationRequest):
-    try:
-        prompt = f"""
-        Parse this aspiration into structured goals:
-        Ideal Self: {request.idealSelf}
-        Current Self: {request.currentSelf}
-        
-        Output JSON only:
-        {{
-            "goals": [
-                {{"name": "Goal 1", "status": "active"}},
-                {{"name": "Goal 2", "status": "active"}}
-            ],
-            "timeline": "X months"
-        }}
-        """
-        
-        response = model.generate_content(prompt)
-        
-        try:
-            parsed = json.loads(response.text)
-        except:
-            parsed = {
-                "goals": [{"name": "Confidence", "status": "active"}],
-                "timeline": "3 months"
-            }
-        
-        goal_ref = db.collection("goals").document()
-        goal_ref.set({
-            "userId": request.userId,
-            "idealSelf": request.idealSelf,
-            "currentSelf": request.currentSelf,
-            "parsedGoals": parsed["goals"],
-            "timeline": parsed["timeline"],
-            "progress": {"overall": 0},
-            "status": "active",
-            "createdAt": firestore.SERVER_TIMESTAMP
-        })
-        
-        return AspirationResponse(
-            goalId=goal_ref.id,
-            parsedGoals=parsed["goals"],
-            suggestedTimeline=parsed["timeline"]
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+class AspirationRequest(BaseModel):
+    user_id: Optional[str] = "demo_user"
+    user_input: str
 
-@router.get("/{userId}")
-async def get_aspirations(userId: str):
-    try:
-        goals = db.collection("goals").where("userId", "==", userId).stream()
-        result = []
-        for goal in goals:
-            data = goal.to_dict()
-            data["goalId"] = goal.id
-            result.append(data)
-        return {"userId": userId, "goals": result}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+@router.post("/aspirations")
+async def create_aspiration(payload: AspirationRequest):
+    if not payload.user_input:
+        raise HTTPException(status_code=400, detail="user_input field is required.")
+    
+    parsed_profile = parse_aspiration(payload.user_input)
+    
+    user_id = payload.user_id or "demo_user"
+    save_document("users", user_id, {
+        "profile": parsed_profile,
+        "raw_aspiration": payload.user_input
+    })
+    
+    return {
+        "status": "success",
+        "user_id": user_id,
+        "profile": parsed_profile
+    }
+
+@router.get("/aspirations/{user_id}")
+async def get_aspiration(user_id: str):
+    data = get_document("users", user_id)
+    if not data:
+        return {"status": "not_found", "profile": None}
+    return {"status": "success", "profile": data.get("profile")}
